@@ -1,0 +1,388 @@
+<html>
+<head>
+    <title>Hear the Gap</title>
+    <meta name="title" content="Hear the Gap">
+    <link rel='shortcut icon' type='image/x-icon' href='images/fav.ico' />
+    <meta name="author" content="edited by gabs, code hacked from Stephen LaPorte and Mahmoud Hashemi">
+    <link rel="stylesheet" type="text/css" href="css/nouislider.custom.css">
+    <link rel="stylesheet" type="text/css" href="css/jquery.tagsinput.css">
+    <script src="js/seedrandom.js" type="text/javascript"></script>
+    <script src="js/jquery-1.9.1.min.js"></script>
+    <script src="js/d3.min.js"></script>
+    <script src="js/reconnecting-websocket.min.js" type="text/javascript"></script>
+    <script src="js/app.js" type="text/javascript"></script>
+
+    <script src="js/jquery.nouislider.min.js"></script>
+    <script src="js/howler.min.js"></script>
+    <script src="js/jquery.tagsinput.js" type="text/javascript"></script>
+    <script>
+    var global_mute = false;
+    var global_volume = 50;
+    var TAG_FILTERS = [];
+    var DEBUG = false;
+    $(function(){
+      Howler.volume(global_volume * .01);
+
+      $("#volumeControl").click(function() {
+        if (!global_mute) {
+          global_mute = false;
+          Howler.mute();
+          $("#volumeControl").css("background-position", "0 0");
+        } else {
+          global_mute = false;
+          Howler.unmute();
+          $("#volumeControl").css("background-position", "0 -46px");
+        }
+      });
+
+      $("#volumeSlider").noUiSlider({
+        range : [-99, 0],
+        start : 0,
+        handles : 1,
+        step : 1,
+        orientation : "horizontal",
+        slide : function() {
+          global_volume = 100 + $(this).val();
+          var howler_volume = global_volume * 0.01;
+          if (howler_volume <= 0.01) {
+            Howler.mute();
+          } else {
+            Howler.unmute();
+            Howler.volume(global_volume * .01);
+          }
+      }});
+
+
+    });
+
+    /* Settings
+       ======== */
+
+    var scale_factor = 5,
+        note_overlap = 15,
+        note_timeout = 300,
+        current_notes = 0,
+        max_life = 60000,
+        DEFAULT_LANG = 'en';
+
+    /* Colors
+       ====== */
+
+    var body_background_color = '#536895',
+        body_text_color = '#536895',
+        svg_background_color = '#536895',
+        svg_text_color = '#FFFFFF',
+        newuser_box_color = '#3CD070',
+        bot_color = '#3CD070',
+        anon_color = '##3CD070',
+        edit_color = '##3CD070',
+        sound_totals = 8,
+        total_edits = 0;
+
+    /* Languages
+       ========= */
+
+    var langs = {
+        'en': ['English', 'ws://wikimon.hatnote.com:9000'],
+        'de': ['German', 'ws://wikimon.hatnote.com:9010'],
+        'ru': ['Russian', 'ws://wikimon.hatnote.com:9020'],
+        'uk': ['Ukrainian', 'ws://wikimon.hatnote.com:9310'],
+        'ja': ['Japanese', 'ws://wikimon.hatnote.com:9030'],
+        'es': ['Spanish', 'ws://wikimon.hatnote.com:9040'],
+        'fr': ['French', 'ws://wikimon.hatnote.com:9050'],
+        'nl': ['Dutch', 'ws://wikimon.hatnote.com:9060'],
+        'it': ['Italian', 'ws://wikimon.hatnote.com:9070'],
+        'sv': ['Swedish', 'ws://wikimon.hatnote.com:9080'],
+        'ar': ['Arabic', 'ws://wikimon.hatnote.com:9090'],
+        'fa': ['Farsi', 'ws://wikimon.hatnote.com:9210'],
+        'he': ['Hebrew' , 'ws://wikimon.hatnote.com:9230'],
+        'id': ['Indonesian', 'ws://wikimon.hatnote.com:9100'],
+        'zh': ['Chinese', 'ws://wikimon.hatnote.com:9240'],
+        'as': ['Assamese', 'ws://wikimon.hatnote.com:9150'],
+        'hi': ['Hindi', 'ws://wikimon.hatnote.com:9140'],
+        'bn': ['Bengali', 'ws://wikimon.hatnote.com:9160'],
+        'pa': ['Punjabi', 'ws://wikimon.hatnote.com:9120'],
+        'te': ['Telugu', 'ws://wikimon.hatnote.com:9165'],
+        'ta': ['Tamil', 'ws://wikimon.hatnote.com:9110'],
+        'ml': ['Malayalam', 'ws://wikimon.hatnote.com:9250'],
+        'mr': ['Western Mari', 'ws://wikimon.hatnote.com:9130'],
+        'kn': ['Kannada', 'ws://wikimon.hatnote.com:9170'],
+        'or': ['Oriya', 'ws://wikimon.hatnote.com:9180'],
+        'sa': ['Sanskrit', 'ws://wikimon.hatnote.com:9190'],
+        'gu': ['Gujarati' , 'ws://wikimon.hatnote.com:9200'],
+        'pl': ['Polish' , 'ws://wikimon.hatnote.com:9260'],
+        'mk': ['Macedonian' , 'ws://wikimon.hatnote.com:9270'],
+        'be': ['Belarusian' , 'ws://wikimon.hatnote.com:9280'],
+        'sr': ['Serbian' , 'ws://wikimon.hatnote.com:9290'],
+        'bg': ['Bulgarian' , 'ws://wikimon.hatnote.com:9300'],
+        'hu': ['Hungarian', 'ws://wikimon.hatnote.com:9320'],
+        'fi': ['Finnish', 'ws://wikimon.hatnote.com:9330'],
+        'no': ['Norwegian', 'ws://wikimon.hatnote.com:9340'],
+        'wikidata': ['Wikidata' , 'ws://wikimon.hatnote.com:9220']
+    }
+
+    /*
+       ============== */
+
+    var w = window,
+        d = document,
+        e = d.documentElement,
+        g = d.getElementsByTagName('#area svg')[0],
+        width = w.innerWidth || e.clientWidth || g.clientWidth;
+        height = (w.innerHeight  - $('#header').height())|| (e.clientHeight - $('#header').height()) || (g.clientHeight - $('#header').height());
+
+    var celesta = [],
+        clav = [],
+        epm = 0,
+        edit_times = [],
+        SOCKETS = {},
+        swells = [],
+        all_loaded = false,
+        s_titles = true,
+        s_welcome = true,
+        s_langs = [];
+
+    var user_announcements = false;
+    setTimeout(function() {
+        user_announcements = true;
+    }, 20000);
+
+    $(function(){
+
+
+        $('body').css('background-color', body_background_color)
+        $('body').css('color', body_text_color)
+        $('svg').css('background-color', svg_background_color)
+        $('svg text').css('color', svg_text_color)
+        // :(
+        $('head').append('<style type="text/css">.newuser-label {fill:' + svg_text_color +
+                         ';} .bot {fill:' + bot_color +
+                         ';} .anon {fill:' + anon_color +
+                         ';} .bot </style>');
+        $('body').append('<div id="loading"><p>Loading sound files ...</p></div>')
+
+        var svg = d3.select("#area").append("svg")
+            .attr({width: width, height: height})
+            /*.style('background-color', '#FFA500');*/
+
+        var update_window = function() {
+            width = w.innerWidth || e.clientWidth || g.clientWidth;
+            height = (w.innerHeight  - $('#header').height())|| (e.clientHeight - $('#header').height()) || (g.clientHeight - $('#header').height());
+
+            svg.attr("width", width).attr("height", height);
+            if (epm_text) {
+                epm_container.attr('transform', 'translate(0, ' + (height - 25) + ')')
+            }
+            update_tag_warning();
+            /*rate_bg.attr("width", width).attr("height", height);*/
+        }
+
+        window.onresize = update_window;
+
+        $('#welcome').click(make_click_handler($('#welcome'), 'nowelcomes')
+        );
+        $('#titles').click(
+            make_click_handler($('#titles'), 'notitles')
+        );
+        $('#background_mode').click(
+            function() {$("#area svg").toggle();}
+        );
+        $('#hide_rc_box').click(
+            function() {$("#rc-log").toggle();}
+        );
+
+        $('#about-link').click(function(){
+            // because we use window.location to set languages.
+            $('html, body').animate({scrollTop:$(document).height()}, 'slow');
+            return false;
+        });
+
+        // TODO: Volume slider?
+        var loaded_sounds = 0
+        var sound_load = function(r) {
+            console.dir(r);
+            loaded_sounds += 1
+            console.log(loaded_sounds);
+            console.log(sound_totals + "sound totals");
+            console.log("right here");
+            sound_totals = 8;
+            if (loaded_sounds == sound_totals) {
+                all_loaded = true
+
+                $('#loading').remove()
+                console.log('Loading complete')
+            } else {
+                // console.log('Loading : ' + loaded_sounds + ' files out of ' + sound_totals)
+            }
+        }
+
+        // load celesta and clav sounds
+    for (var i = 1; i <= 6; i++) {
+
+        celesta.push(new Howl({
+                urls : ['sounds/sounds/men.ogg',
+                        'sounds/sounds/men.mp3'],
+                volume : 0.4,
+                onload : sound_load(),
+            }));
+    }
+
+        clav.push(new Howl({
+                urls : ['sounds/sounds/woman.ogg',
+                        'sounds/sounds/woman.mp3'],
+                volume : 0.4,
+                onload : sound_load(),
+            }));
+        swells.push(new Howl({
+          urls : ['sounds/sounds/men.ogg',
+                  'sounds/sounds/men.mp3'],
+                volume : 0.4,
+                onload : sound_load(),
+            }))
+        /*
+        for (var i = 1; i <= 24; i++) {
+            if (i > 9) {
+                fn = 'c0' + i;
+            } else {
+                fn = 'c027' + i;
+            }
+            celesta.push(new Howl({
+                urls : ['sounds/' + fn + '.ogg',
+                        'sounds/' + fn + '.mp3'],
+                volume : 0.2,
+                onload : sound_load(),
+            }))
+            clav.push(new Howl({
+                urls : ['sounds/' + fn + '.ogg',
+                        'sounds/' + fn + '.mp3'],
+                volume : 0.2,
+                onload : sound_load(),
+            }))
+        }
+
+        // load swell sounds
+        for (var i = 1; i <= 3; i++) {
+            swells.push(new Howl({
+                urls : ['sounds/' + i + '.ogg',
+                        'sounds/' + i + '.mp3'],
+                volume : 1,
+                onload : sound_load(),
+            }))
+        }*/
+
+
+        function testuser() {
+            data = {user: 'Slaporte'}
+            newuser_action(data, 'en', svg)
+        }
+
+        testuser()
+
+
+        for (lang in langs) {
+            if (langs.hasOwnProperty(lang)) {
+                if (lang == 'wikidata') {
+                    $('#lang-boxes').append('<p><input type="checkbox" name="' + langs[lang][0] + '" id="' + lang + '-enable"/><label for="' + lang + '-enable">' + langs[lang][0] + ' <span class="conStatus" id="' + lang + '-status"></span></label></p>')
+                } else {
+                    $('#lang-boxes').append('<p><input type="checkbox" name="' + langs[lang][0] + '" id="' + lang + '-enable"/><label for="' + lang + '-enable">' + langs[lang][0] + ' Wikipedia <span class="conStatus" id="' + lang + '-status"></span></label></p>')
+                }
+                SOCKETS[lang] = new wikipediaSocket.init(langs[lang][1], lang, svg);
+                var box = $('#' + lang + '-enable');
+                if (box.is(':checked')) {
+                    enable(lang)
+                }
+                box.click(make_click_handler(box, lang));
+            }
+        }
+
+        enabled_langs = return_lang_settings();
+
+        if (!enabled_langs.length) {
+            enabled_langs.push(DEFAULT_LANG)
+        }
+        for (var i = 0; i < enabled_langs.length + 1; i ++) {
+            var lang = enabled_langs[i];
+            $('#' + lang + '-enable').prop('checked', true);
+            if (SOCKETS[lang] && (!SOCKETS[lang].connection ||
+                                  SOCKETS[lang].connection.readyState == 3)) {
+                SOCKETS[lang].connect();
+            }
+        }
+      $('#filter').tagsInput({
+        height: '45px',
+        width: '80%',
+        'delimiter': [' ', ','],
+        defaultText: 'Add a tag',
+        defaultTextWidth: 100,
+        unique: false,
+        onChange: function() {
+          TAG_FILTERS = [];
+          $('.tag span').each(function(val) {
+              var tag = $(this).text().trim().replace('#', '').toLowerCase();
+              if($.inArray(tag, TAG_FILTERS) === -1){
+                TAG_FILTERS.push(tag);
+              }
+          });
+          update_tag_warning(svg);
+          console.log('Watching for: ' + TAG_FILTERS)
+        }
+      });
+
+    })
+    </script>
+<link href='css/style.css' rel='stylesheet' type='text/css'>
+</head>
+
+
+<body>
+
+    <div id='header'>
+      <span class="about-link">
+        <span id="volumeWrapper" class="interface">
+          <span id="volumeSlider" class="noUiSlider"></span>
+        </span>    </span>
+        <span class="about-link">
+        <a id="about-link" href="">Read more</a></span>
+        <h1>87% of Wikipedia is edited by men</h1>
+    </div>
+
+
+<div id='area'>
+
+</div>
+    <div id='content'>
+
+
+        <div class='bg'>
+                  <h3>About</h3>
+                    <p></p>
+                 <p>Wikipedia is one of the top 10 most used websites in the world and the most widely used encyclopedia. Yet it's <a href="https://commons.wikimedia.org/w/index.php?title=File:Editor_Survey_Report_-_April_2011.pdf" target="_blank">estimated</a> that 84%-92% of all Wikipedia entries are edited or produced by men. This means that as litle as 8% will be edited by women. This creates a systemic bias of our world's knowledge, you can go <a href="http://blog.wikimedia.org/2015/03/04/inspire-campaign-funds-gender-diversity/" target="_blank">here</a>, <a href="http://www.technologyreview.com/view/534616/computational-linguistics-reveals-how-wikipedia-articles-are-biased-against-women/" target="_blank">here</a> or <a href="http://www.fastcompany.com/3041871/strong-female-lead/more-like-dude-ipedia-study-shows-wikipedias-sexist-bias" target="_blank">here</a> to read more about this.</p>
+
+                 <p>Hear the Gap was hacked by gabs from the original <a href="http://listen.hatnote.com/" target="_blank">Listen to Wikipedia project</a> created by Stephen LaPorte and Mahmoud Hashemi. It estimates the number of male editors based on surveys that have been conducted by Wikipedia. The edits are real time however the male and female edits are randomly assigned.</p>
+                 <p></p>
+                 <p></p>
+                <h3>Recent changes</h3>
+                <div id='rc-log-c'>
+                <ul id='rc-log'>
+                </ul>
+                 <div class="note">
+                  <p id="edit_counter"></p>
+                  <p>For more, see Wikipedia's RecentChanges pages for <a href="http://www.wikipedia.org/">each language</a>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-66417179-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+</body>
+</html>
